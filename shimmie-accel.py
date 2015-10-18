@@ -46,6 +46,7 @@ def get_tags(db):
 
 
 def handle_req(req, tags):
+    start = time.time()
     yays = [x.lower() for x in req.get('yays', [])]
     nays = [x.lower() for x in req.get('nays', [])]
     offset = req.get('offset', 0)
@@ -61,7 +62,7 @@ def handle_req(req, tags):
         results -= tags.get(tag, set())
 
     data = sorted(list(results), reverse=True)[offset:offset+limit]
-    log.info("%r" % req)
+    log.info("%r %.3f" % (req, time.time() - start))
     return data
 
 
