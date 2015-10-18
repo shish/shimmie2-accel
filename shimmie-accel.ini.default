@@ -1,0 +1,11 @@
+[accel]
+address = 0.0.0.0
+port = 21212
+refresh = 300
+
+[database]
+protocol = postgres
+database = mydb
+hostname = localhost
+username = myname
+password = mypass
