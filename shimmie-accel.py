@@ -22,7 +22,7 @@ def get_db(config):
     return db
 
 
-def get_tags(db):
+def update_tags(db, tags):
     log.info("Fetching fresh data")
     cur = db.cursor()
 
@@ -32,7 +32,6 @@ def get_tags(db):
         tag_id_to_tag[tag_id] = tag.lower()
 
     cur.execute("SELECT tag_id, image_id FROM image_tags ORDER BY image_id DESC")
-    tags = {}
     for tag_id, image_id in cur:
         tag = tag_id_to_tag[tag_id]
         if tag not in tags:
@@ -62,7 +61,7 @@ def handle_req(req, tags):
         results -= tags.get(tag, set())
 
     data = sorted(list(results), reverse=True)[offset:offset+limit]
-    log.info("%r %.3f" % (req, time.time() - start))
+    log.info("%r %.4f" % (req, time.time() - start))
     return data
 
 
@@ -80,7 +79,7 @@ class ShAccHandler(SocketServer.StreamRequestHandler):
                     try:
                         _update_in_progress = True
                         self.request.close()
-                        self.server.tags = get_tags(self.server.db)
+                        update_tags(self.server.db, self.server.tags)
                     finally:
                         _update_in_progress = False
             else:
@@ -138,14 +137,16 @@ class Refresher(threading.Thread):
 def main():
     config = Config('shimmie-accel.ini')
     logging.basicConfig(
-        format="%(asctime)s %(thread)d %(message)s",
+        # format="%(asctime)s %(message)s",
+        format="%(message)s",
         level=logging.DEBUG
     )
 
     ThreadingTCPServer.allow_reuse_address = 1
     server = ThreadingTCPServer((config.address, config.port), ShAccHandler)
     server.db = get_db(config)
-    server.tags = get_tags(server.db)
+    server.tags = {}
+    update_tags(server.db, server.tags)
 
     if config.refresh:
         refresher = Refresher(config.refresh, server)
