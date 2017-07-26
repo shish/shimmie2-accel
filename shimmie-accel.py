@@ -1,11 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import json
-import SocketServer
+import socketserver
 import threading
 import time
 import socket
-from ConfigParser import SafeConfigParser
+from configparser import SafeConfigParser
 
 import logging
 log = logging.getLogger('shacc')
@@ -67,7 +67,7 @@ def handle_req(req, tags):
 
 _update_in_progress = False
 
-class ShAccHandler(SocketServer.StreamRequestHandler):
+class ShAccHandler(socketserver.StreamRequestHandler):
     def handle(self):
         data = None
         try:
@@ -90,7 +90,7 @@ class ShAccHandler(SocketServer.StreamRequestHandler):
         return True
 
 
-class ThreadingTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
+class ThreadingTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     pass
 
 
