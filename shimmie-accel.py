@@ -49,18 +49,14 @@ class Accel():
         async with aiopg.create_pool(self._dsn, timeout=120) as db:
             async with db.acquire() as conn:
                 async with conn.cursor() as cur:
-                    await cur.execute("SELECT id, tag FROM tags")
-                    tag_id_to_tag = {}
-                    async for (tag_id, tag) in cur:
-                        tag_id_to_tag[tag_id] = tag.lower()
-
-                    await cur.execute("SELECT tag_id, array_agg(image_id) FROM image_tags GROUP BY tag_id")
-                    async for tag_id, image_ids in cur:
-                        tag = tag_id_to_tag[tag_id]
-#                        if tag not in tags:
-#                            tags[tag] = set()
+                    await cur.execute("""
+                        SELECT lower(tag), array_agg(image_id)
+                        FROM image_tags
+                        JOIN tags ON image_tags.tag_id = tags.id
+                        GROUP BY tags.tag
+                    """)
+                    async for tag, image_ids in cur:
                         tags[tag] = set(image_ids)
-
         log.info("Fetched fresh data")
         self.tags = tags
         return tags
