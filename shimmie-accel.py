@@ -1,97 +1,13 @@
 #!/usr/bin/env python3
 
+import asyncio
 import json
-import socketserver
-import threading
 import time
 import socket
 from configparser import SafeConfigParser
 
 import logging
 log = logging.getLogger('shacc')
-
-
-def get_db(config):
-    log.info("Connecting to DB")
-    if config.protocol == "postgres":
-        import psycopg2
-        db = psycopg2.connect("dbname=%s user=%s password=%s" % (
-            config.database, config.username, config.password))
-    else:
-        raise Exception("Unsupported database: %r" % config.protocol)
-    return db
-
-
-def update_tags(db, tags):
-    log.info("Fetching fresh data")
-    cur = db.cursor()
-
-    cur.execute("SELECT id, tag FROM tags")
-    tag_id_to_tag = {}
-    for (tag_id, tag) in cur:
-        tag_id_to_tag[tag_id] = tag.lower()
-
-    cur.execute("SELECT tag_id, image_id FROM image_tags ORDER BY image_id DESC")
-    for tag_id, image_id in cur:
-        tag = tag_id_to_tag[tag_id]
-        if tag not in tags:
-            tags[tag] = set()
-        tags[tag].add(image_id)
-
-    cur.close()
-
-    log.info("Fetched fresh data")
-    return tags
-
-
-def handle_req(req, tags):
-    start = time.time()
-    yays = [x.lower() for x in req.get('yays', [])]
-    nays = [x.lower() for x in req.get('nays', [])]
-    offset = req.get('offset', 0)
-    limit = req.get('limit', 50)
-
-    if not yays:
-        yays.append('')
-
-    results = tags.get(yays[0], set()).copy()
-    for tag in yays[1:]:
-        results &= tags.get(tag, set())
-    for tag in nays:
-        results -= tags.get(tag, set())
-
-    data = sorted(list(results), reverse=True)[offset:offset+limit]
-    log.info("%r %.4f" % (req, time.time() - start))
-    return data
-
-
-_update_in_progress = False
-
-class ShAccHandler(socketserver.StreamRequestHandler):
-    def handle(self):
-        data = None
-        try:
-            data = self.request.recv(4096).strip()
-            req = json.loads(data)
-            if req.get('reset'):
-                global _update_in_progress
-                if not _update_in_progress:
-                    try:
-                        _update_in_progress = True
-                        self.request.close()
-                        update_tags(self.server.db, self.server.tags)
-                    finally:
-                        _update_in_progress = False
-            else:
-                data = handle_req(req, self.server.tags)
-                self.request.send(json.dumps(data))
-        except Exception:
-            log.exception("Error handling request %r:" % data)
-        return True
-
-
-class ThreadingTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-    pass
 
 
 class Config(object):
@@ -108,52 +24,112 @@ class Config(object):
         self.password = cp.get('database', 'password')
 
 
-class Refresher(threading.Thread):
-    def __init__(self, refresh, server):
-        threading.Thread.__init__(self)
-        self.name = "refresher"
-        self.daemon = True
+class Accel():
+    def __init__(self):
+        self.tags = {}
+        self._update_in_progress = False
 
-        self.refresh = refresh
-        self.server = server
+        self.db = None
+        self.config = Config('shimmie-accel.ini')
+
+        if self.config.protocol == "postgres":
+            self._dsn = "dbname=%s user=%s password=%s" % (
+                self.config.database,
+                self.config.username, 
+                self.config.password
+            )
+        else:
+            raise Exception("Unsupported database: %r" % self.config.protocol)
+
+    async def _update_tags(self):
+        log.info("Fetching fresh data")
+        tags = {}
+
+        import aiopg
+        async with aiopg.create_pool(self._dsn, timeout=120) as db:
+            async with db.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT id, tag FROM tags")
+                    tag_id_to_tag = {}
+                    async for (tag_id, tag) in cur:
+                        tag_id_to_tag[tag_id] = tag.lower()
+
+                    await cur.execute("SELECT tag_id, array_agg(image_id) FROM image_tags GROUP BY tag_id")
+                    async for tag_id, image_ids in cur:
+                        tag = tag_id_to_tag[tag_id]
+#                        if tag not in tags:
+#                            tags[tag] = set()
+                        tags[tag] = set(image_ids)
+
+        log.info("Fetched fresh data")
+        self.tags = tags
+        return tags
+
+    async def handle_query(self, reader, writer):
+        #addr = writer.get_extra_info('peername')
+        data = None
+        try:
+            data = await reader.read(4096)
+            data = data.strip()
+            req = json.loads(data.decode('utf8'))
+
+            start = time.time()
+            yays = [x.lower() for x in req.get('yays', [])]
+            nays = [x.lower() for x in req.get('nays', [])]
+            offset = req.get('offset', 0)
+            limit = req.get('limit', 50)
+
+            if not yays:
+                yays.append('')
+
+            results = self.tags.get(yays[0], set()).copy()
+            for tag in yays[1:]:
+                results &= self.tags.get(tag, set())
+            for tag in nays:
+                results -= self.tags.get(tag, set())
+
+            data = sorted(list(results), reverse=True)[offset:offset+limit]
+            log.info("%r %.4f" % (req, time.time() - start))
+            
+            writer.write(json.dumps(data).encode('utf8'))
+            await writer.drain()
+            writer.close()
+        except Exception:
+            log.exception("Error handling request %r:" % data)
+        return True
+
+    async def refresher(self):
+        while self.config.refresh > 0:
+            if not self._update_in_progress:
+                try:
+                    self._update_in_progress = True
+                    await self._update_tags()
+                finally:
+                    self._update_in_progress = False
+            await asyncio.sleep(self.config.refresh)
 
     def run(self):
-        (ip, port) = self.server.server_address
-        if ip == '0.0.0.0':
-            ip = '127.0.0.1'
-        while True:
-            try:
-                log.info("Refreshing")
-                time.sleep(self.refresh)
+        logging.basicConfig(
+            # format="%(asctime)s %(message)s",
+            format="%(message)s",
+            level=logging.DEBUG
+        )
 
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.connect((ip, port))
-                sock.send(json.dumps({'reset': True}))
-                sock.close()
-            except Exception:
-                log.exception("Error refreshing")
+        loop = asyncio.get_event_loop()
 
+        loop.run_until_complete(
+            self._update_tags()
+        )
 
-def main():
-    config = Config('shimmie-accel.ini')
-    logging.basicConfig(
-        # format="%(asctime)s %(message)s",
-        format="%(message)s",
-        level=logging.DEBUG
-    )
+        server = loop.run_until_complete(asyncio.gather(
+            asyncio.Task(self.refresher()),
+            asyncio.start_server(self.handle_query, self.config.address, self.config.port, loop=loop),
+        ))
+        server.close()
+        loop.run_until_complete(server.wait_closed())
 
-    ThreadingTCPServer.allow_reuse_address = 1
-    server = ThreadingTCPServer((config.address, config.port), ShAccHandler)
-    server.db = get_db(config)
-    server.tags = {}
-    update_tags(server.db, server.tags)
-
-    if config.refresh:
-        refresher = Refresher(config.refresh, server)
-        refresher.start()
-
-    server.serve_forever()
+        loop.close()
 
 
 if __name__ == "__main__":
-    main()
+    Accel().run()
