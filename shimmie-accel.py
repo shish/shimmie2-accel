@@ -17,6 +17,7 @@ class Config(object):
         self.address = cp.get('accel', 'address') or '0.0.0.0'
         self.port = cp.getint('accel', 'port') or 21212
         self.refresh = cp.getint('accel', 'refresh') or 300
+        self.timeout = cp.getint('accel', 'timeout') or 120
         self.protocol = cp.get('database', 'protocol')
         self.database = cp.get('database', 'database')
         self.hostname = cp.get('database', 'hostname')
@@ -46,7 +47,7 @@ class Accel():
         tags = {}
 
         import aiopg
-        async with aiopg.create_pool(self._dsn, timeout=120) as db:
+        async with aiopg.create_pool(self._dsn, timeout=self.config.timeout) as db:
             async with db.acquire() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute("""
