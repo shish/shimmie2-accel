@@ -89,7 +89,7 @@ class Accel():
                 data = len(list(results))
             else:
                 data = sorted(list(results), reverse=True)[offset:offset+limit]
-            log.info("%r %.4f" % (req, time.time() - start))
+            log.info("%r %.4f (%d)" % (req, time.time() - start, len(list(results))))
             
             writer.write(json.dumps(data).encode('utf8'))
             await writer.drain()
