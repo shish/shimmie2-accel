@@ -85,7 +85,10 @@ class Accel():
             for tag in nays:
                 results -= self.tags.get(tag, set())
 
-            data = sorted(list(results), reverse=True)[offset:offset+limit]
+            if req.get("count"):
+                data = len(list(results))
+            else:
+                data = sorted(list(results), reverse=True)[offset:offset+limit]
             log.info("%r %.4f" % (req, time.time() - start))
             
             writer.write(json.dumps(data).encode('utf8'))
