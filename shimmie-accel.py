@@ -36,13 +36,13 @@ class Accel():
         if self.config.protocol == "postgres":
             self._dsn = "dbname=%s user=%s password=%s" % (
                 self.config.database,
-                self.config.username, 
+                self.config.username,
                 self.config.password
             )
         else:
             raise Exception("Unsupported database: %r" % self.config.protocol)
 
-    async def _update_tags(self):
+    async def _update_tags(self, fast=False):
         log.info("Fetching fresh data")
         tags = {}
 
@@ -50,14 +50,27 @@ class Accel():
         async with aiopg.create_pool(self._dsn, timeout=self.config.timeout) as db:
             async with db.acquire() as conn:
                 async with conn.cursor() as cur:
+                    prefixes = []
                     await cur.execute("""
-                        SELECT lower(tag), array_agg(image_id)
-                        FROM image_tags
-                        JOIN tags ON image_tags.tag_id = tags.id
-                        GROUP BY tags.tag
+                        SELECT DISTINCT lower(left(tag, 1)) AS tag_c
+                        FROM tags
+                        ORDER BY tag_c
                     """)
-                    async for tag, image_ids in cur:
-                        tags[tag] = set(image_ids)
+                    async for prefix in cur:
+                        prefixes.append(prefix[0])
+                    for prefix in prefixes:
+                        log.info("Fetching "+prefix)
+                        await cur.execute("""
+                            SELECT lower(tag), array_agg(image_id)
+                            FROM image_tags
+                            JOIN tags ON image_tags.tag_id = tags.id
+                            WHERE lower(left(tag, 1)) = %s
+                            GROUP BY tags.tag
+                        """, (prefix, ))
+                        async for tag, image_ids in cur:
+                            tags[tag] = set(image_ids)
+                        if not fast:
+                            await asyncio.sleep(1)
         log.info("Fetched fresh data")
         self.tags = tags
         return tags
@@ -90,7 +103,7 @@ class Accel():
             else:
                 data = sorted(list(results), reverse=True)[offset:offset+limit]
             log.info("%r %.4f (%d)" % (req, time.time() - start, len(list(results))))
-            
+
             writer.write(json.dumps(data).encode('utf8'))
             await writer.drain()
             writer.close()
@@ -118,7 +131,7 @@ class Accel():
         loop = asyncio.get_event_loop()
 
         loop.run_until_complete(
-            self._update_tags()
+            self._update_tags(fast=True)
         )
 
         server = loop.run_until_complete(asyncio.gather(
