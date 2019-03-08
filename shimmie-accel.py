@@ -102,7 +102,7 @@ class Accel():
                 data = len(list(results))
             else:
                 data = sorted(list(results), reverse=True)[offset:offset+limit]
-            log.info("%r %.4f (%d)" % (req, time.time() - start, len(list(results))))
+            log.debug("%r %.4f (%d)" % (req, time.time() - start, len(list(results))))
 
             writer.write(json.dumps(data).encode('utf8'))
             await writer.drain()
@@ -125,7 +125,7 @@ class Accel():
         logging.basicConfig(
             # format="%(asctime)s %(message)s",
             format="%(message)s",
-            level=logging.DEBUG
+            level=logging.INFO
         )
 
         loop = asyncio.get_event_loop()
