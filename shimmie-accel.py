@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 import socket
-from configparser import SafeConfigParser
+from configparser import ConfigParser
 
 import logging
 log = logging.getLogger('shacc')
@@ -12,7 +12,7 @@ log = logging.getLogger('shacc')
 
 class Config(object):
     def __init__(self, filename):
-        cp = SafeConfigParser()
+        cp = ConfigParser()
         cp.read(filename)
         self.address = cp.get('accel', 'address') or '0.0.0.0'
         self.port = cp.getint('accel', 'port') or 21212
