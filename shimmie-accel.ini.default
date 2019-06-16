@@ -9,3 +9,4 @@ database = mydb
 hostname = localhost
 username = myname
 password = mypass
+dataport = 5432

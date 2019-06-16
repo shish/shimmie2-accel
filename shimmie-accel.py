@@ -23,6 +23,7 @@ class Config(object):
         self.hostname = cp.get('database', 'hostname')
         self.username = cp.get('database', 'username')
         self.password = cp.get('database', 'password')
+        self.dataport = cp.get('database', 'dataport')
 
 
 class Accel():
@@ -34,10 +35,12 @@ class Accel():
         self.config = Config('shimmie-accel.ini')
 
         if self.config.protocol == "postgres":
-            self._dsn = "dbname=%s user=%s password=%s" % (
+            self._dsn = "host=%s dbname=%s user=%s password=%s port=%s" % (
+                self.config.hostname,
                 self.config.database,
                 self.config.username,
-                self.config.password
+                self.config.password,
+                self.config.dataport,
             )
         else:
             raise Exception("Unsupported database: %r" % self.config.protocol)
@@ -54,6 +57,7 @@ class Accel():
                     await cur.execute("""
                         SELECT DISTINCT lower(left(tag, 1)) AS tag_c
                         FROM tags
+                        WHERE count > 0
                         ORDER BY tag_c
                     """)
                     async for prefix in cur:
